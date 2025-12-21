@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "zapcast"
+version = "0.1.0"
+description = "Blazing fast way to cast emojis, text snippets"
+requires-python = ">=3.14"
+dependencies = [
+    "emoji>=2.15.0",
+    "pyside6>=6.10.1",
+    "ruff>=0.14.10",
+    "ty>=0.0.5",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/zapcast"]
