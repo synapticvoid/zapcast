@@ -1,7 +1,11 @@
 # AGENTS.md
 
+## Environment
+- Virtual environment: `.venv/` (managed by `uv`)
+- Activate with: `source .venv/bin/activate`
+
 ## Commands
-- **Format/Lint**: `make ruff` (runs ruff format + ruff check --fix)
+- **Format/Lint**: `make ruff`
 - **Run app**: `uv run python -m zapcast.main`
 - **Type check**: `ty check src/` (uses ty type checker)
 - No tests exist yet

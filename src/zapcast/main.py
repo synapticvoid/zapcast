@@ -1,7 +1,7 @@
 import logging
 import sys
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer
 from PySide6.QtGui import QClipboard
 from PySide6.QtWidgets import (
     QApplication,
@@ -149,8 +149,13 @@ class EmojiPicker(QMainWindow):
         self.emoji_store = EmojiStore()
         self.search_bar: QLineEdit | None = None
         self.scroll_area: QScrollArea | None = None
-        self.content_widget: QWidget | None = None
-        self.content_layout: QVBoxLayout | None = None
+        self._search_timer = QTimer()
+        self._search_timer.setSingleShot(True)
+        self._search_timer.timeout.connect(self._do_search)
+        self._pending_query: str = ""
+        self._all_emojis_widget: QWidget | None = None
+        self._search_results_widget: QWidget | None = None
+        self._showing_all = True
         self.setup_ui()
 
     def setup_ui(self):
@@ -173,45 +178,78 @@ class EmojiPicker(QMainWindow):
         )
         layout.addWidget(self.scroll_area)
 
-        self.content_widget = QWidget()
-        self.content_layout = QVBoxLayout(self.content_widget)
-        self.content_layout.setContentsMargins(5, 5, 5, 5)
-        self.content_layout.setSpacing(0)
-        self.scroll_area.setWidget(self.content_widget)
-
         self.load_emojis()
 
     def load_emojis(self):
         self.emoji_store.load()
-        self._populate_emojis()
+        self._build_all_emojis_widget()
+        self.scroll_area.setWidget(self._all_emojis_widget)
 
-    def _populate_emojis(self, query: str = ""):
-        if self.content_layout is None:
+    def _build_all_emojis_widget(self):
+        self._all_emojis_widget = QWidget()
+        layout = QVBoxLayout(self._all_emojis_widget)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(0)
+
+        grouped = self.emoji_store.get_grouped_emojis()
+        current_section: CategorySection | None = None
+        for item in grouped:
+            if item.is_category_header:
+                current_section = CategorySection(item.category_name)
+                layout.addWidget(current_section)
+            elif current_section:
+                current_section.add_emoji(item.char, self.copy_emoji)
+
+        layout.addStretch()
+
+    def _show_all_emojis(self):
+        if self._showing_all:
             return
+        old = self.scroll_area.takeWidget()
+        if old and old is not self._all_emojis_widget:
+            old.deleteLater()
+        self.scroll_area.setWidget(self._all_emojis_widget)
+        self._showing_all = True
 
-        while self.content_layout.count():
-            item = self.content_layout.takeAt(0)
-            widget = item.widget() if item else None
-            if widget:
-                widget.deleteLater()
+    def _show_search_results(self, query: str):
+        old = self.scroll_area.takeWidget()
+        if old and old is not self._all_emojis_widget:
+            old.deleteLater()
+        import time
 
-        if query:
-            grouped = self.emoji_store.search_grouped(query, limit=1000)
-        else:
-            grouped = self.emoji_store.get_grouped_emojis()
+        logger.debug(f"Search term: {query}")
+        start = time.perf_counter()
+        grouped = self.emoji_store.search_grouped(query, limit=1000)
+        end = time.perf_counter()
+        duration = (end - start) * 1000
+        logger.debug(f"Duration {duration} ms")
+
+        self._search_results_widget = QWidget()
+        layout = QVBoxLayout(self._search_results_widget)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(0)
 
         current_section: CategorySection | None = None
         for item in grouped:
             if item.is_category_header:
                 current_section = CategorySection(item.category_name)
-                self.content_layout.addWidget(current_section)
+                layout.addWidget(current_section)
             elif current_section:
                 current_section.add_emoji(item.char, self.copy_emoji)
 
-        self.content_layout.addStretch()
+        layout.addStretch()
+        self.scroll_area.setWidget(self._search_results_widget)
+        self._showing_all = False
 
     def filter_emojis(self, query: str) -> None:
-        self._populate_emojis(query)
+        self._pending_query = query
+        self._search_timer.start(75)
+
+    def _do_search(self) -> None:
+        if self._pending_query:
+            self._show_search_results(self._pending_query)
+        else:
+            self._show_all_emojis()
 
     def copy_emoji(self, emoji: str) -> None:
         logger.debug(f"Copying emoji to clipboard: {emoji}")

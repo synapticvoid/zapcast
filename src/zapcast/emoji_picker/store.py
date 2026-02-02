@@ -125,17 +125,26 @@ class EmojiStore:
                         break
             return list(seen.keys())
 
+        candidates: list[tuple[str, int]] = [
+            (text, i)
+            for i, text in enumerate(self.search_texts)
+            if query_lower[0] in text or query_lower[:2] in text
+        ]
+
+        if not candidates:
+            return []
+
         results = process.extract(
             query_lower,
-            self.search_texts,
-            scorer=fuzz.WRatio,
+            [c[0] for c in candidates],
+            scorer=fuzz.ratio,
             limit=limit * 2,
-            score_cutoff=60,
+            score_cutoff=50,
         )
 
         seen_emojis: dict[str, None] = {}
         for _, _, idx in results:
-            emoji_char = self.emoji_chars[idx]
+            emoji_char = self.emoji_chars[candidates[idx][1]]
             if emoji_char not in seen_emojis:
                 seen_emojis[emoji_char] = None
                 if len(seen_emojis) >= limit:
