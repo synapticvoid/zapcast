@@ -1,91 +1,217 @@
 import logging
 import sys
-from json import load
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, QRect, QSize, Qt
 from PySide6.QtGui import QClipboard
 from PySide6.QtWidgets import (
     QApplication,
-    QGridLayout,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLayout,
     QLineEdit,
     QMainWindow,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
-from zapcast.settings import load_settings, setup_logging
+from zapcast.emoji_picker import EmojiStore
+from zapcast.settings import load_settings
 
 logger = logging.getLogger(__name__)
+
+
+class FlowLayout(QLayout):
+    def __init__(self, parent=None, margin=0, spacing=-1):
+        super().__init__(parent)
+        self.setContentsMargins(margin, margin, margin, margin)
+        self._spacing = spacing
+        self._items: list = []
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):
+        if 0 <= index < len(self._items):
+            return self._items[index]
+        return None
+
+    def takeAt(self, index):
+        if 0 <= index < len(self._items):
+            return self._items.pop(index)
+        return None
+
+    def spacing(self):
+        return self._spacing if self._spacing >= 0 else 5
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._do_layout(QRect(0, 0, width, 0), test_only=True)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._do_layout(rect, test_only=False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        margins = self.contentsMargins()
+        size += QSize(
+            margins.left() + margins.right(), margins.top() + margins.bottom()
+        )
+        return size
+
+    def _do_layout(self, rect, test_only):
+        x = rect.x()
+        y = rect.y()
+        line_height = 0
+        spacing = self.spacing()
+
+        for item in self._items:
+            item_size = item.sizeHint()
+            next_x = x + item_size.width() + spacing
+
+            if next_x - spacing > rect.right() and line_height > 0:
+                x = rect.x()
+                y = y + line_height + spacing
+                next_x = x + item_size.width() + spacing
+                line_height = 0
+
+            if not test_only:
+                item.setGeometry(QRect(QPoint(x, y), item_size))
+
+            x = next_x
+            line_height = max(line_height, item_size.height())
+
+        return y + line_height - rect.y()
+
+
+class EmojiButton(QPushButton):
+    def __init__(self, emoji: str, parent=None):
+        super().__init__(emoji, parent)
+        self.emoji = emoji
+        self.setFixedSize(50, 50)
+        self.setStyleSheet(
+            "QPushButton { font-size: 24px; border: none; background: transparent; }"
+            "QPushButton:hover { background: palette(midlight); border-radius: 5px; }"
+        )
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+
+class CategorySection(QWidget):
+    def __init__(self, category_name: str, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 5, 0, 5)
+        layout.setSpacing(5)
+
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(8)
+
+        label = QLabel(category_name)
+        label.setStyleSheet("font-weight: bold; font-size: 11px; color: palette(text);")
+
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setFrameShadow(QFrame.Shadow.Sunken)
+        line.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        header_layout.addWidget(label)
+        header_layout.addWidget(line)
+        layout.addLayout(header_layout)
+
+        self.emoji_container = QWidget()
+        self.flow_layout = FlowLayout(self.emoji_container, margin=0, spacing=2)
+        layout.addWidget(self.emoji_container)
+
+    def add_emoji(self, emoji: str, callback):
+        btn = EmojiButton(emoji)
+        btn.clicked.connect(lambda: callback(emoji))
+        self.flow_layout.addWidget(btn)
 
 
 class EmojiPicker(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.emoji_store = EmojiStore()
         self.search_bar: QLineEdit | None = None
+        self.scroll_area: QScrollArea | None = None
+        self.content_widget: QWidget | None = None
+        self.content_layout: QVBoxLayout | None = None
         self.setup_ui()
 
     def setup_ui(self):
         self.setWindowTitle("zapcast")
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
 
-        # Central widget
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
 
-        # Search bar
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("Search emojis...")
+        self.search_bar.textChanged.connect(self.filter_emojis)
         layout.addWidget(self.search_bar)
 
-        # Emoji grid
-        emoji_widget = QWidget()
-        self.emoji_layout = QGridLayout(emoji_widget)
-        layout.addWidget(emoji_widget)
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        layout.addWidget(self.scroll_area)
+
+        self.content_widget = QWidget()
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(5, 5, 5, 5)
+        self.content_layout.setSpacing(0)
+        self.scroll_area.setWidget(self.content_widget)
 
         self.load_emojis()
 
     def load_emojis(self):
-        emojis = [
-            "😀",
-            "😃",
-            "😄",
-            "😁",
-            "😅",
-            "😂",
-            "🤣",
-            "😊",
-            "😇",
-            "🙂",
-            "🙃",
-            "😉",
-            "😌",
-            "😍",
-            "🥰",
-            "😘",
-            "👍",
-            "👎",
-            "👋",
-            "🤝",
-            "🙏",
-            "✌️",
-            "🤞",
-            "🤘",
-        ]
+        self.emoji_store.load()
+        self._populate_emojis()
 
-        row, col = 0, 0
-        for emoji in emojis:
-            btn = QPushButton(emoji)
-            btn.setFixedSize(50, 50)
-            btn.setStyleSheet("font-size: 24px;")
-            btn.clicked.connect(lambda checked, e=emoji: self.copy_emoji(e))
-            self.emoji_layout.addWidget(btn, row, col)
+    def _populate_emojis(self, query: str = ""):
+        if self.content_layout is None:
+            return
 
-            col += 1
-            if col > 7:  # 8 columns
-                col = 0
-                row += 1
+        while self.content_layout.count():
+            item = self.content_layout.takeAt(0)
+            widget = item.widget() if item else None
+            if widget:
+                widget.deleteLater()
+
+        if query:
+            grouped = self.emoji_store.search_grouped(query, limit=1000)
+        else:
+            grouped = self.emoji_store.get_grouped_emojis()
+
+        current_section: CategorySection | None = None
+        for item in grouped:
+            if item.is_category_header:
+                current_section = CategorySection(item.category_name)
+                self.content_layout.addWidget(current_section)
+            elif current_section:
+                current_section.add_emoji(item.char, self.copy_emoji)
+
+        self.content_layout.addStretch()
+
+    def filter_emojis(self, query: str) -> None:
+        self._populate_emojis(query)
 
     def copy_emoji(self, emoji: str) -> None:
         logger.debug(f"Copying emoji to clipboard: {emoji}")
