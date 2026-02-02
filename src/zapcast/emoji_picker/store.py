@@ -3,9 +3,10 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-import emojis.db as emojis_db  # ty:ignore[unresolved-import]
 from emoji import EMOJI_DATA  # ty:ignore[unresolved-import]
 from rapidfuzz import fuzz, process
+
+from zapcast.emoji_picker.emoji_categories import EMOJI_CATEGORIES
 
 logger = logging.getLogger(__name__)
 
@@ -62,13 +63,7 @@ class EmojiStore:
         return seen_emojis
 
     def _get_category(self, emoji_char: str) -> str:
-        try:
-            emoji_info = emojis_db.get_emoji_by_code(emoji_char)
-            if emoji_info and emoji_info.category:
-                return emoji_info.category
-        except Exception:
-            pass
-        return "Other"
+        return EMOJI_CATEGORIES.get(emoji_char, "Other")
 
     def get_grouped_emojis(self) -> list[EmojiItem]:
         seen: set[str] = set()

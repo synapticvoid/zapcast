@@ -1,9 +1,10 @@
 import logging
 import sys
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer
+from PySide6.QtCore import QPoint, QPropertyAnimation, QRect, QSize, Qt, QTimer
 from PySide6.QtGui import QClipboard
 from PySide6.QtWidgets import (
+    QGraphicsOpacityEffect,
     QApplication,
     QFrame,
     QHBoxLayout,
@@ -22,6 +23,50 @@ from zapcast.emoji_picker import EmojiStore
 from zapcast.settings import load_settings
 
 logger = logging.getLogger(__name__)
+
+
+class ToastWidget(QLabel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setStyleSheet(
+            "background-color: rgba(50, 50, 50, 200); color: white; "
+            "padding: 8px 16px; border-radius: 8px; font-size: 14px;"
+        )
+        self.hide()
+
+        self._opacity = QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(self._opacity)
+        self._opacity.setOpacity(0.0)
+
+        self._fade_in = QPropertyAnimation(self._opacity, b"opacity")
+        self._fade_in.setDuration(150)
+        self._fade_in.setStartValue(0.0)
+        self._fade_in.setEndValue(1.0)
+
+        self._fade_out = QPropertyAnimation(self._opacity, b"opacity")
+        self._fade_out.setDuration(300)
+        self._fade_out.setStartValue(1.0)
+        self._fade_out.setEndValue(0.0)
+        self._fade_out.finished.connect(self.hide)
+
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self._fade_out.start)
+
+    def show_message(self, message: str, duration: int = 1000):
+        self.setText(message)
+        self.adjustSize()
+        if self.parentWidget():
+            parent_rect = self.parentWidget().rect()
+            x = (parent_rect.width() - self.width()) // 2
+            y = parent_rect.height() - self.height() - 20
+            self.move(x, y)
+        self._fade_out.stop()
+        self._timer.stop()
+        self.show()
+        self._fade_in.start()
+        self._timer.start(duration)
 
 
 class FlowLayout(QLayout):
@@ -158,6 +203,7 @@ class EmojiPicker(QMainWindow):
         self._all_emojis_widget: QWidget | None = None
         self._search_results_widget: QWidget | None = None
         self._showing_all = True
+        self._toast: ToastWidget | None = None
         self.setup_ui()
 
     def setup_ui(self):
@@ -171,6 +217,7 @@ class EmojiPicker(QMainWindow):
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("Search emojis...")
         self.search_bar.textChanged.connect(self.filter_emojis)
+        self.search_bar.setClearButtonEnabled(True)
         layout.addWidget(self.search_bar)
 
         self.scroll_area = QScrollArea()
@@ -180,7 +227,9 @@ class EmojiPicker(QMainWindow):
         )
         layout.addWidget(self.scroll_area)
 
-        self.load_emojis()
+        self._toast = ToastWidget(central_widget)
+
+        QTimer.singleShot(0, self.load_emojis)
 
     def load_emojis(self):
         self.emoji_store.load()
@@ -257,7 +306,8 @@ class EmojiPicker(QMainWindow):
         logger.debug(f"Copying emoji to clipboard: {emoji}")
         clipboard: QClipboard = QApplication.clipboard()
         clipboard.setText(emoji)
-        # self.close()
+        if self._toast:
+            self._toast.show_message(f"{emoji} copied!")
 
 
 def main() -> None:
