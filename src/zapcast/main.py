@@ -99,7 +99,7 @@ class FlowLayout(QLayout):
 
 
 class EmojiButton(QPushButton):
-    def __init__(self, emoji: str, parent=None):
+    def __init__(self, emoji: str, name: str = "", parent=None):
         super().__init__(emoji, parent)
         self.emoji = emoji
         self.setFixedSize(50, 50)
@@ -108,6 +108,8 @@ class EmojiButton(QPushButton):
             "QPushButton:hover { background: palette(midlight); border-radius: 5px; }"
         )
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        if name:
+            self.setToolTip(name)
 
 
 class CategorySection(QWidget):
@@ -137,8 +139,8 @@ class CategorySection(QWidget):
         self.flow_layout = FlowLayout(self.emoji_container, margin=0, spacing=2)
         layout.addWidget(self.emoji_container)
 
-    def add_emoji(self, emoji: str, callback):
-        btn = EmojiButton(emoji)
+    def add_emoji(self, emoji: str, name: str, callback):
+        btn = EmojiButton(emoji, name)
         btn.clicked.connect(lambda: callback(emoji))
         self.flow_layout.addWidget(btn)
 
@@ -198,7 +200,7 @@ class EmojiPicker(QMainWindow):
                 current_section = CategorySection(item.category_name)
                 layout.addWidget(current_section)
             elif current_section:
-                current_section.add_emoji(item.char, self.copy_emoji)
+                current_section.add_emoji(item.char, item.name, self.copy_emoji)
 
         layout.addStretch()
 
@@ -235,7 +237,7 @@ class EmojiPicker(QMainWindow):
                 current_section = CategorySection(item.category_name)
                 layout.addWidget(current_section)
             elif current_section:
-                current_section.add_emoji(item.char, self.copy_emoji)
+                current_section.add_emoji(item.char, item.name, self.copy_emoji)
 
         layout.addStretch()
         self.scroll_area.setWidget(self._search_results_widget)

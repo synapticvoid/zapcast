@@ -25,6 +25,7 @@ CATEGORY_ORDER = [
 @dataclass
 class EmojiItem:
     char: str
+    name: str = ""
     is_category_header: bool = False
     category_name: str = ""
 
@@ -34,6 +35,7 @@ class EmojiStore:
         self.search_texts: list[str] = []
         self.emoji_chars: list[str] = []
         self.emoji_categories: dict[str, str] = {}
+        self.emoji_names: dict[str, str] = {}
 
     def load(self) -> set[str]:
         logger.info("Loading emojis...")
@@ -45,6 +47,7 @@ class EmojiStore:
 
             category = self._get_category(emoji_char)
             self.emoji_categories[emoji_char] = category
+            self.emoji_names[emoji_char] = primary_name
 
             if "alias" in data:
                 for alias in data["alias"]:
@@ -93,14 +96,16 @@ class EmojiStore:
                     EmojiItem(char="", is_category_header=True, category_name=category)
                 )
                 for emoji_char in emojis_list:
-                    items.append(EmojiItem(char=emoji_char))
+                    name = self.emoji_names.get(emoji_char, "")
+                    items.append(EmojiItem(char=emoji_char, name=name))
 
         if categorized["Other"]:
             items.append(
                 EmojiItem(char="", is_category_header=True, category_name="Other")
             )
             for emoji_char in categorized["Other"]:
-                items.append(EmojiItem(char=emoji_char))
+                name = self.emoji_names.get(emoji_char, "")
+                items.append(EmojiItem(char=emoji_char, name=name))
 
         return items
 
@@ -137,7 +142,7 @@ class EmojiStore:
         results = process.extract(
             query_lower,
             [c[0] for c in candidates],
-            scorer=fuzz.ratio,
+            scorer=fuzz.WRatio,
             limit=limit * 2,
             score_cutoff=50,
         )
@@ -175,14 +180,16 @@ class EmojiStore:
                     EmojiItem(char="", is_category_header=True, category_name=category)
                 )
                 for emoji_char in emojis_list:
-                    items.append(EmojiItem(char=emoji_char))
+                    name = self.emoji_names.get(emoji_char, "")
+                    items.append(EmojiItem(char=emoji_char, name=name))
 
         if categorized["Other"]:
             items.append(
                 EmojiItem(char="", is_category_header=True, category_name="Other")
             )
             for emoji_char in categorized["Other"]:
-                items.append(EmojiItem(char=emoji_char))
+                name = self.emoji_names.get(emoji_char, "")
+                items.append(EmojiItem(char=emoji_char, name=name))
 
         return items
 
